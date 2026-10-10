@@ -1,0 +1,42 @@
+name: Publish signed Android update
+
+on:
+  push:
+    branches: [packages]
+    paths: ["distribution/**"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: android-public-release
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Verify release metadata and checksums
+        run: |
+          python3 - <<'PY'
+          import json, re
+          from pathlib import Path
+          data = json.loads(Path('distribution/release.json').read_text())
+          assert re.fullmatch(r'android-v\d+\.\d+\.\d+-build\.\d+', data['tag'])
+          Path('release-tag.txt').write_text(data['tag'])
+          PY
+          (cd distribution && sha256sum --check SHA256SUMS.txt)
+      - name: Publish APK
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          RELEASE_TAG="$(cat release-tag.txt)"
+          if gh release view "$RELEASE_TAG" > /dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" distribution/SniffSubPlayer-Android.apk distribution/SHA256SUMS.txt --clobber
+          else
+            gh release create "$RELEASE_TAG" distribution/SniffSubPlayer-Android.apk distribution/SHA256SUMS.txt \
+              --target "$GITHUB_SHA" --title "SniffSubPlayer Android $RELEASE_TAG" \
+              --notes-file distribution/release-notes.md --latest
+          fi
